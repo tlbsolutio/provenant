@@ -1,0 +1,17 @@
+{
+  "name": "provenant",
+  "version": "0.1.0",
+  "description": "Open-source, AI-agnostic, BYOK skill to verify a video source — timestamped transcript (headless browser, no key), provenance, fact-check and bias. For journalists, researchers and educators.",
+  "type": "module",
+  "scripts": {
+    "transcript": "node scripts/get_transcript.mjs",
+    "provenance": "node scripts/provenance.mjs",
+    "postinstall": "node -e \"console.log('Provenant ready. For headless transcripts run: npx playwright install chromium')\""
+  },
+  "keywords": ["agent-skill", "transcript", "youtube", "fact-check", "verification", "provenance", "osint", "journalism", "headless"],
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "optionalDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

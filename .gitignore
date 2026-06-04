@@ -1,0 +1,17 @@
+# secrets — NEVER commit (this repo is public + BYOK)
+.env
+.env.*
+!.env.example
+*.key
+*-credentials*
+
+# output / scratch
+out/
+*.local.*
+
+# node
+node_modules/
+npm-debug.log*
+
+# os
+.DS_Store
