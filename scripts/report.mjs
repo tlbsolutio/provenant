@@ -3,14 +3,15 @@
 // Usage (lib): import { renderReport } from "./report.mjs"
 //        (cli): node scripts/report.mjs <url|id> --analyze [--ai ...] [-o out.html]
 import { writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { getTranscript } from "./get_transcript.mjs";
 import { getProvenance } from "./provenance.mjs";
 import { analyze } from "./analyze.mjs";
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // AI-supplied links must be http(s) only — block javascript:/data: etc.
 const safeUrl = (u) => { try { return /^https?:$/.test(new URL(u).protocol) ? String(u) : "#"; } catch { return "#"; } };
-const ts = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = Math.floor(s % 60); return (h ? h + ":" : "") + `${String(m).padStart(h ? 2 : 1, "0")}:${String(x).padStart(2, "0")}`; };
+const ts = (s) => { if (!Number.isFinite(s) || s < 0) s = 0; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = Math.floor(s % 60); return (h ? h + ":" : "") + `${String(m).padStart(h ? 2 : 1, "0")}:${String(x).padStart(2, "0")}`; };
 const VC = { "true": ["#15803d", "#dcfce7"], "mostly true": ["#15803d", "#dcfce7"], mixed: ["#b45309", "#fef3c7"], misleading: ["#b45309", "#fef3c7"], unverifiable: ["#52525b", "#f4f4f5"], "false": ["#b91c1c", "#fee2e2"] };
 
 export function renderReport({ provenance: p, transcript: t, analysis: a }) {
@@ -25,17 +26,20 @@ export function renderReport({ provenance: p, transcript: t, analysis: a }) {
     const links = (a.keyLinks || []).map((l) => `<li><a href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener nofollow">${esc(l.label || l.url)}</a>${l.note ? " — " + esc(l.note) : ""}</li>`).join("") || "<li class='muted'>—</li>";
     const fc = (a.factChecks || []).map((f) => { const [fg, bg] = VC[(f.verdict || "").toLowerCase()] || VC.unverifiable;
       const src = (f.sources || []).map((s) => `<a href="${esc(safeUrl(s))}" target="_blank" rel="noopener nofollow">source</a>`).join(" ");
-      const tag = f.webChecked ? "" : ' <span class="ai">AI-inferred</span>';
+      const tag = f.webChecked ? "" : (f.webError ? ' <span class="ai">web-check failed</span>' : ' <span class="ai">AI-inferred</span>');
       return `<div class="fc" style="--fg:${fg};--vbg:${bg}"><span class="v">${esc(f.verdict)}</span><p class="c">${esc(f.claim)}</p><p class="e">${esc(f.explanation)}${tag} ${src}</p></div>`; }).join("") || "<p class='muted'>No discrete claims.</p>";
-    const b = a.bias || {}; const pol = b.political; const pos = b.score == null ? 50 : Math.max(2, Math.min(98, 50 + b.score * 10));
+    const b = a.bias || {}; const pol = b.political;
+    const numScore = typeof b.score === "number" && Number.isFinite(b.score);
+    const assessed = numScore || !!b.lean || typeof pol === "boolean";
+    const pos = numScore ? Math.max(2, Math.min(98, 50 + b.score * 10)) : 50;
     A = `<div class="badge">Analysis</div>
 <p class="lead">${esc(a.tldr)}</p>
 <section><h2>Summary</h2><div class="prose"><p>${esc(a.summary)}</p></div></section>
 <section><h2>Key points</h2><ul class="pts">${kp}</ul></section>
 <section><h2>Links &amp; tools</h2><ul class="lk">${links}</ul></section>
 <section><h2>Fact-check</h2>${fc}</section>
-<section><h2>Political bias</h2><div class="bl">${esc(b.label || (pol ? b.lean : "Non-political"))}</div>
-<div class="meter"><div class="trk"></div><div class="dot${pol ? "" : " off"}" style="left:${pos}%"></div><div class="tk"><span>Left</span><span>Center</span><span>Right</span></div></div>
+<section><h2>Political bias</h2><div class="bl">${assessed ? esc(b.label || (pol ? b.lean : "Non-political")) : "Bias not assessed"}</div>
+<div class="meter"><div class="trk"></div><div class="dot${pol && assessed ? "" : " off"}" style="left:${pos}%"></div><div class="tk"><span>Left</span><span>Center</span><span>Right</span></div></div>
 <dl class="bias"><div><dt>Political?</dt><dd>${pol ? "Yes" : "No"}</dd></div><div><dt>Lean</dt><dd>${esc(b.lean || "None")}</dd></div><div><dt>Confidence</dt><dd>${esc(b.confidence || "—")}</dd></div></dl>
 <div class="prose"><p>${esc(b.evidence)}</p></div>${b.other_bias ? `<aside class="callout"><strong>Worth flagging:</strong> ${esc(b.other_bias)}</aside>` : ""}</section>
 <p class="disc">Analysis by ${esc(a.provider || "AI")}; web-verified claims vs AI-inferred kept separate. Best-effort research aid, not editorial fact-checking. Bias −5 left · 0 center/none · +5 right.</p>`;
@@ -76,9 +80,9 @@ details{border-top:1px solid var(--border);margin-top:6px}summary{cursor:pointer
 footer{text-align:center;color:var(--muted);font-size:12px;padding:0 22px 50px}
 </style></head><body>
 <header><div class="wrap">
-<div class="pills"><span class="pill">Verified source</span>${a ? '<span class="pill">Analyzed</span>' : ""}<span class="pill g">${words.toLocaleString()} words</span>${t.hasTimestamps ? '<span class="pill g">timestamped</span>' : ""}</div>
+<div class="pills">${p.source?.length ? '<span class="pill">Source identified</span>' : '<span class="pill" style="background:#b91c1c">Provenance unverified</span>'}${a ? '<span class="pill">Analyzed</span>' : ""}<span class="pill g">${words.toLocaleString()} words</span>${t.hasTimestamps ? '<span class="pill g">timestamped</span>' : ""}</div>
 <h1>${esc(p.title || "(untitled)")}</h1>
-<p class="by">${esc(p.channel || "")}${p.publishedAt ? " · " + esc(String(p.publishedAt).slice(0, 10)) : ""} · <a href="${esc(p.url)}" target="_blank" rel="noopener">source</a></p>
+<p class="by">${esc(p.channel || "")}${p.publishedAt ? " · " + esc(String(p.publishedAt).slice(0, 10)) : ""} · <a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener nofollow">source</a></p>
 </div></header>
 <main><div class="wrap">
 ${A}
@@ -91,8 +95,11 @@ ${A}
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   const input = args.find((x) => !x.startsWith("-"));
-  const out = args.includes("-o") ? args[args.indexOf("-o") + 1] : `${input?.match(/[A-Za-z0-9_-]{11}/)?.[0] || "report"}.html`;
   const id = input?.match(/[A-Za-z0-9_-]{11}/)?.[0];
+  // constrain output to a .html file in the current directory (no path traversal)
+  let out = args.includes("-o") ? basename(args[args.indexOf("-o") + 1] || "") : `${id || "report"}.html`;
+  if (!out || out === ".") out = `${id || "report"}.html`;
+  if (!out.toLowerCase().endsWith(".html")) out += ".html";
   if (!id) { console.log("Usage: report.mjs <url|id> [--analyze] [--ai ...] [-o out.html]"); process.exit(1); }
   const [provenance, transcript] = await Promise.all([
     getProvenance(id, { youtubeKey: process.env.YOUTUBE_API_KEY }),

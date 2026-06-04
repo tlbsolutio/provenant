@@ -63,6 +63,10 @@ async function viaKome(id) {
   if (!r.ok) throw new Error(`kome.ai ${r.status}`);
   const text = clean((await r.json()).transcript);
   if (!text) throw new Error("kome.ai empty");
+  // reject error pages / blocked responses masquerading as a transcript
+  if (text.split(/\s+/).length < 5) throw new Error("kome.ai returned suspiciously short text");
+  if (/sign in to confirm|video unavailable|enable javascript|are you a robot|captcha/i.test(text))
+    throw new Error("kome.ai returned an error page, not a transcript");
   return { source: "kome.ai", hasTimestamps: false, segments: null, text };
 }
 
@@ -73,12 +77,13 @@ export async function getTranscript(input, opts = {}) {
   if (opts.supadataKey) attempts.push(() => viaSupadata(id, opts.supadataKey));
   if (opts.browser !== false && (await hasPlaywright())) attempts.push(() => viaBrowser(id));
   attempts.push(() => viaKome(id));
-  let lastErr;
+  const errs = [];
   for (const fn of attempts) {
     try { const r = await fn(); return { videoId: id, words: r.text.split(/\s+/).length, ...r }; }
-    catch (e) { lastErr = e; if (opts.verbose) console.error(`[transcript] ${e.message}`); }
+    catch (e) { errs.push(e.message); if (opts.verbose) console.error(`[transcript] ${e.message}`); }
   }
-  throw lastErr || new Error("all transcript methods failed");
+  // surface every failure cause, so "no captions" is distinguishable from "all providers blocked"
+  throw Object.assign(new Error(`all transcript methods failed: ${errs.join(" | ")}`), { attempts: errs });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

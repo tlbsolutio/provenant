@@ -43,14 +43,18 @@ async function runApi(provider, p, key) {
     const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST",
       headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4096, messages: [{ role: "user", content: p }] }) });
-    if (!r.ok) throw new Error(`anthropic ${r.status}`);
-    return (await r.json()).content.map((c) => c.text).join("");
+    if (!r.ok) throw new Error(`anthropic ${r.status}: ${await r.text()}`);
+    const txt = ((await r.json()).content || []).map((c) => c.text || "").join("");
+    if (!txt) throw new Error("anthropic: empty response");
+    return txt;
   }
   const r = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({ model: "gpt-4o", response_format: { type: "json_object" }, messages: [{ role: "user", content: p }] }) });
-  if (!r.ok) throw new Error(`openai ${r.status}`);
-  return (await r.json()).choices[0].message.content;
+  if (!r.ok) throw new Error(`openai ${r.status}: ${await r.text()}`);
+  const txt = (await r.json()).choices?.[0]?.message?.content;
+  if (!txt) throw new Error("openai: empty response");
+  return txt;
 }
 
 async function tavily(fcs, key) {
@@ -59,8 +63,12 @@ async function tavily(fcs, key) {
     try {
       const r = await fetch("https://api.tavily.com/search", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ api_key: key, query: f.query, max_results: 3, search_depth: "advanced" }) });
-      if (r.ok) { f.sources = ((await r.json()).results || []).slice(0, 3).map((x) => x.url); f.webChecked = true; }
-    } catch {}
+      if (!r.ok) throw new Error(`tavily ${r.status}`);
+      const srcs = ((await r.json()).results || []).slice(0, 3).map((x) => x.url).filter(Boolean);
+      // only call it web-checked when we actually have sources to show
+      if (srcs.length) { f.sources = srcs; f.webChecked = true; }
+      else f.webError = "no web sources found";
+    } catch (e) { f.webError = e.message; }   // surfaced as "web-check failed", never silently "verified"
     delete f.query;
   }
 }
@@ -70,7 +78,13 @@ export async function analyze({ meta, text }, opts = {}) {
   const p = prompt(meta, text);
   const raw = provider === "claude-cli" ? await runClaudeCli(p) : await runApi(provider, p, opts.anthropicKey || opts.openaiKey);
   const a = grabJson(raw); a.provider = provider;
-  if (a.factChecks?.length && opts.tavilyKey) await tavily(a.factChecks, opts.tavilyKey);
+  // never render a structurally-incomplete analysis as if it were whole
+  const bad = [];
+  if (typeof a.summary !== "string" || !a.summary.trim()) bad.push("summary");
+  if (!Array.isArray(a.factChecks)) bad.push("factChecks");
+  if (!a.bias || typeof a.bias !== "object") bad.push("bias");
+  if (bad.length) throw new Error(`AI returned an incomplete analysis (missing/invalid: ${bad.join(", ")}). Re-run or try another --ai provider.`);
+  if (a.factChecks.length && opts.tavilyKey) await tavily(a.factChecks, opts.tavilyKey);
   else (a.factChecks || []).forEach((f) => delete f.query);
   return a;
 }
