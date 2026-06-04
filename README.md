@@ -49,6 +49,23 @@ The repo ships a ready-made shortcut at [`commands/provenant.md`](commands/prove
 
 and you get the whole verification — transcript, fact-check (with web search), and bias — answered right in the conversation.
 
+## Publishing a shareable page (optional)
+
+A local `report.html` is fine on your laptop — but useless on a **server or VPS**, where `localhost` isn't reachable from anywhere else. So `--publish` turns the report into a real link:
+
+```bash
+node provenant/scripts/report.mjs "<video link>" --analyze --publish
+```
+
+It writes the page into your site directory (`PROVENANT_PUBLISH_DIR`), rebuilds an index, and — if that directory is linked to [Vercel](https://vercel.com) (or you set `PROVENANT_VERCEL=1`) and the `vercel` CLI is installed — deploys it and prints the public `https://…` URL. No target configured? It says so and hands back the file path, rather than pretending it published.
+
+Two switches worth knowing:
+
+- `PROVENANT_PUBLISH=1` — publish on **every** run, so you never have to remember the flag.
+- The published URL is also submitted to the **Wayback Machine** by default (set `PROVENANT_ARCHIVE=0` to skip). archive.org tends to block datacenter IPs, so if the snapshot can't be taken from your host, Provenant prints a manual `web.archive.org/save/…` link you can open from your browser.
+
+If you drive Provenant through an agent, it can also deploy via a Vercel MCP server instead of the CLI — same outcome, a public link.
+
 ## How it actually works
 
 There's no magic. Each step tries a few methods and takes the first that works:

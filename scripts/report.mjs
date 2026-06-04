@@ -123,12 +123,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   writeFileSync(out, renderReport({ provenance, transcript, analysis }));
   console.log(`report → ${out}`);
 
-  // --publish: copy the report into the configured site dir and (VPS-aware) deploy it.
-  if (args.includes("--publish")) {
+  // Publish: copy the report into the configured site dir and (VPS-aware) deploy it.
+  // Triggered by --publish, or always when PROVENANT_PUBLISH=1 (set it in .env to
+  // make every run publish without passing the flag).
+  if (args.includes("--publish") || process.env.PROVENANT_PUBLISH === "1") {
     const { publish } = await import("./publish.mjs");
     const dir = args.includes("--publish-dir") ? args[args.indexOf("--publish-dir") + 1] : undefined;
-    const r = publish({ htmlPath: out, id, dir });
-    if (r.url) console.log(`published → ${r.url}`);
-    else console.log(`not published (${r.reason})${r.page ? `\nlocal: ${r.page}` : ""}`);
+    const r = await publish({ htmlPath: out, id, dir });
+    if (r.url) {
+      console.log(`published → ${r.url}`);
+      if (r.archive?.ok) console.log(`archived  → ${r.archive.url}`);
+      else if (r.archive) console.log(`archive   → not captured (${r.archive.reason}); save manually: ${r.archive.manual}`);
+    } else {
+      console.log(`not published (${r.reason})${r.page ? `\nlocal: ${r.page}` : ""}`);
+    }
   }
 }

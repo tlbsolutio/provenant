@@ -42,7 +42,10 @@ The point of `--publish` is a link anyone can open — important on a **VPS/data
 1. Resolve the site dir from `--publish-dir`, else `PROVENANT_PUBLISH_DIR`. None set → it writes the file and tells you where; it never claims to have published.
 2. Copies `<id>.html` into the dir + regenerates `index.html`.
 3. If the dir is linked to Vercel (`.vercel/project.json`) **or** `PROVENANT_VERCEL=1`, and the `vercel` CLI is present → `vercel deploy --prod --yes` and print the stable `https://<project>.vercel.app/<id>.html`.
-4. No Vercel CLI / no target → prints the local path so you can host it elsewhere.
+4. Submits the published URL to the **Wayback Machine** (skip with `PROVENANT_ARCHIVE=0`). archive.org blocks many datacenter IPs → on failure it prints a manual `web.archive.org/save/…` link instead of failing.
+5. No Vercel CLI / no target → prints the local path so you can host it elsewhere.
+
+Set `PROVENANT_PUBLISH=1` in `.env` to publish on **every** run without passing `--publish` (recommended once a target is wired).
 
 **Host-agent checklist before publishing:** confirm a real web target exists. Check `command -v vercel` (CLI) **or** a Vercel MCP tool (e.g. `deploy_to_vercel`). On a bot-walled VPS the CLI/MCP route is the *only* way to a public link — don't hand back a `file://` path and call it published. If no target is configured, say so plainly and return just the inline brief.
 
