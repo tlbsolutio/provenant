@@ -18,7 +18,12 @@ git clone https://github.com/tlbsolutio/provenant
 node provenant/scripts/get_transcript.mjs "<video link>"        # transcript
 node provenant/scripts/provenance.mjs   "<video link>"          # who/when/channel
 ```
-That's it. Nothing to configure.
+
+**Full verification report** (HTML — summary, fact-check, bias + transcript):
+```bash
+node provenant/scripts/report.mjs "<video link>" --analyze -o report.html
+```
+Analysis runs through **local Claude Code** by default (your subscription, no API key) — or `--ai anthropic` / `--ai openai` with your key. Open `report.html` in a browser.
 
 ## Want more? (all optional)
 - **Timestamps, no key** — `npm i && npx playwright install chromium`, then it scrapes the real transcript panel with timecodes. Auto-used when present.

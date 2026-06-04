@@ -6,7 +6,9 @@
   "scripts": {
     "transcript": "node scripts/get_transcript.mjs",
     "provenance": "node scripts/provenance.mjs",
-    "postinstall": "node -e \"console.log('Provenant ready. For headless transcripts run: npx playwright install chromium')\""
+    "analyze": "node scripts/analyze.mjs",
+    "report": "node scripts/report.mjs",
+    "postinstall": "node -e \"console.log('Provenant ready. Optional timestamps: npx playwright install chromium')\""
   },
   "keywords": ["agent-skill", "transcript", "youtube", "fact-check", "verification", "provenance", "osint", "journalism", "headless"],
   "license": "MIT",

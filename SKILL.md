@@ -26,7 +26,7 @@ Optional keys (Supadata/Tavily/YouTube): `cp .env.example .env`.
 3. **Analyze** (you do this with whatever model is running): write a one-line TL;DR + short neutral summary, 6–10 key points, and the tools/links named (real official URLs only — never invent the description's links).
 4. **Fact-check** — pull only CONCRETE checkable claims. For each, verify with whatever web/search tool you have (web search, Tavily, Google Fact Check API…) and record `verdict ∈ {True, Mostly True, Mixed, Misleading, False, Unverifiable}` + sources + the **timestamp** where it's said. No search tool? Mark claims `Unverifiable (AI-inferred)` — never bluff.
 5. **Bias** — political lean (Left…Center…Right / None, score −5..+5, `null` if non-political) with evidence + confidence. Separately flag non-political slants (commercial/promotional, sponsorship).
-6. **Output** — a brief with each claim tied to its timestamp and sources. Optionally render `assets/report-template.html` (editorial layout) or hand back markdown.
+6. **Output** — a brief with each claim tied to its timestamp and sources. For a polished HTML report in one shot, the bundled pipeline can do steps 1–6 itself: `node scripts/report.mjs "<url>" --analyze -o report.html` (uses local Claude Code by default, or `--ai anthropic|openai`). Otherwise hand back markdown.
 
 ## Honesty rules (non-negotiable for this audience)
 - Always separate **verified-by-web** from **AI-inferred**; cite real sources; the human makes the call. You're a research assistant, not an oracle.
