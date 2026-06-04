@@ -11,12 +11,10 @@ Turn a video link into a **verifiable brief**: a timestamped transcript plus pro
 - "Is this video legit / accurate?" · "Fact-check this clip." · "Summarize + check this source."
 - A journalist / researcher / educator needs to vet or cite a video quickly.
 
-## Setup (once, fast)
-```bash
-npm i                       # installs playwright (optional but recommended)
-npx playwright install chromium
-cp .env.example .env        # optional keys — skip for the free path
-```
+## Setup
+**None required** — the free path needs only Node 18+ (no install, no key, no login).
+Optional, for timestamped transcripts: `npm i && npx playwright install chromium`.
+Optional keys (Supadata/Tavily/YouTube): `cp .env.example .env`.
 
 ## Workflow
 1. **Transcript** — run the bundled fetcher (AI-agnostic, key-optional):
