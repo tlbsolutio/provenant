@@ -39,6 +39,16 @@ node provenant/scripts/report.mjs "<video link>" --analyze -o report.html
 
 By default the analysis runs through your local Claude Code (your subscription, not a metered API). If you'd rather use a key, add `--ai anthropic` or `--ai openai`.
 
+### Optional: a `/provenant` slash command
+
+The repo ships a ready-made shortcut at [`commands/provenant.md`](commands/provenant.md). Drop it into your harness's commands folder (for Claude Code: `cp commands/provenant.md ~/.claude/commands/`) and then, in any chat, just type:
+
+```
+/provenant <video link>
+```
+
+and you get the whole verification — transcript, fact-check (with web search), and bias — answered right in the conversation.
+
 ## How it actually works
 
 There's no magic. Each step tries a few methods and takes the first that works:
