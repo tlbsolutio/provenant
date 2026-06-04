@@ -7,10 +7,8 @@ import { basename } from "node:path";
 import { getTranscript } from "./get_transcript.mjs";
 import { getProvenance } from "./provenance.mjs";
 import { analyze } from "./analyze.mjs";
+import { esc, safeUrl, loadEnv } from "./lib.mjs";
 
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-// AI-supplied links must be http(s) only — block javascript:/data: etc.
-const safeUrl = (u) => { try { return /^https?:$/.test(new URL(u).protocol) ? String(u) : "#"; } catch { return "#"; } };
 const ts = (s) => { if (!Number.isFinite(s) || s < 0) s = 0; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = Math.floor(s % 60); return (h ? h + ":" : "") + `${String(m).padStart(h ? 2 : 1, "0")}:${String(x).padStart(2, "0")}`; };
 const VC = { "true": ["#15803d", "#dcfce7"], "mostly true": ["#15803d", "#dcfce7"], mixed: ["#b45309", "#fef3c7"], misleading: ["#b45309", "#fef3c7"], unverifiable: ["#52525b", "#f4f4f5"], "false": ["#b91c1c", "#fee2e2"] };
 
@@ -94,13 +92,7 @@ ${A}
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
-  // Load .env from the repo root (zero-dep). Shell-exported vars take precedence.
-  try {
-    for (const line of readFileSync(new URL("../.env", import.meta.url), "utf8").split("\n")) {
-      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
-    }
-  } catch { /* no .env — fine */ }
+  loadEnv(import.meta.url); // shell-exported vars take precedence
   const input = args.find((x) => !x.startsWith("-"));
   const id = input?.match(/[A-Za-z0-9_-]{11}/)?.[0];
   // constrain output to a .html file in the current directory (no path traversal)
@@ -114,13 +106,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   let analysis = null;
   if (args.includes("--analysis-file")) {
     // Preferred: the host agent did the web-verified analysis and hands it in as JSON.
-    analysis = JSON.parse(readFileSync(args[args.indexOf("--analysis-file") + 1], "utf8"));
+    const af = args[args.indexOf("--analysis-file") + 1];
+    try { analysis = JSON.parse(readFileSync(af, "utf8")); }
+    catch (e) { console.error(`error: could not read --analysis-file "${af}": ${e.message}`); process.exit(1); }
   } else if (args.includes("--analyze")) {
     // Autonomous fallback: let the bundled analyzer do it (claude-cli by default).
     const provider = args.includes("--ai") ? args[args.indexOf("--ai") + 1] : undefined;
     analysis = await analyze({ meta: provenance, text: transcript.text }, { provider, anthropicKey: process.env.ANTHROPIC_API_KEY, openaiKey: process.env.OPENAI_API_KEY, tavilyKey: process.env.TAVILY_API_KEY });
   }
-  writeFileSync(out, renderReport({ provenance, transcript, analysis }));
+  const html = renderReport({ provenance, transcript, analysis });
+  writeFileSync(out, html);
   console.log(`report → ${out}`);
 
   // Publish: copy the report into the configured site dir and (VPS-aware) deploy it.
@@ -129,13 +124,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (args.includes("--publish") || process.env.PROVENANT_PUBLISH === "1") {
     const { publish } = await import("./publish.mjs");
     const dir = args.includes("--publish-dir") ? args[args.indexOf("--publish-dir") + 1] : undefined;
-    const r = await publish({ htmlPath: out, id, dir });
+    const r = await publish({ html, id, dir }); // pass the rendered HTML directly — no re-read
     if (r.url) {
       console.log(`published → ${r.url}`);
       if (r.archive?.ok) console.log(`archived  → ${r.archive.url}`);
       else if (r.archive) console.log(`archive   → not captured (${r.archive.reason}); save manually: ${r.archive.manual}`);
     } else {
       console.log(`not published (${r.reason})${r.page ? `\nlocal: ${r.page}` : ""}`);
+      if (r.log) console.error(`\n${r.log}`);
     }
   }
 }

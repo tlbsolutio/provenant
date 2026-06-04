@@ -13,16 +13,20 @@
 //   PROVENANT_ARCHIVE=0     skip the Wayback Machine snapshot of the published URL.
 //   ARCHIVE_ORG_ACCESS_KEY / ARCHIVE_ORG_SECRET_KEY   authenticated Save Page Now.
 // A dir already linked to Vercel (has .vercel/project.json) deploys automatically.
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, openSync, readSync, closeSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { execFileSync } from "node:child_process";
-
-const expand = (p) => (p && p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+import { esc, expandHome, loadEnv } from "./lib.mjs";
 
 function hasVercelCli() {
   try { execFileSync("vercel", ["--version"], { stdio: "ignore" }); return true; } catch { return false; }
+}
+
+// Read just the first bytes of a file (the <title> is always in <head>).
+function head(path, n = 1024) {
+  const fd = openSync(path, "r");
+  try { const b = Buffer.alloc(n); const len = readSync(fd, b, 0, n, 0); return b.toString("utf8", 0, len); }
+  finally { closeSync(fd); }
 }
 
 // Rebuild a simple, dependency-free index listing every published page (title from <title>).
@@ -30,7 +34,7 @@ function regenIndex(dir) {
   const files = readdirSync(dir).filter((f) => f.endsWith(".html") && f !== "index.html");
   const rows = files.map((f) => {
     let title = f;
-    try { const m = readFileSync(join(dir, f), "utf8").match(/<title>([^<]*)<\/title>/i); if (m) title = m[1].replace(/\s*[—-]\s*Provenant.*$/i, "").trim() || f; } catch { /* keep filename */ }
+    try { const m = head(join(dir, f)).match(/<title>([^<]*)<\/title>/i); if (m) title = m[1].replace(/\s*[—-]\s*Provenant.*$/i, "").trim() || f; } catch { /* keep filename */ }
     return `<li><a href="./${esc(f)}">${esc(title)}</a></li>`;
   }).join("\n");
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -51,11 +55,13 @@ async function archiveUrl(url, { accessKey, secretKey } = {}) {
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
     const res = await fetch(save, { method: "POST", headers, body: `url=${encodeURIComponent(url)}`, signal: ctrl.signal });
-    if (res.ok || res.status === 302) {
-      const loc = res.headers.get("content-location") || "";
-      return { ok: true, url: loc.startsWith("/web/") ? `https://web.archive.org${loc}` : `https://web.archive.org/web/*/${url}` };
-    }
-    return { ok: false, reason: `archive.org returned ${res.status} (datacenter IPs are often blocked)`, manual: save };
+    if (!res.ok) return { ok: false, reason: `archive.org returned ${res.status} (datacenter IPs are often blocked)`, manual: save };
+    // A confirmed capture comes back with a /web/<timestamp>/ location; otherwise it
+    // was accepted but the snapshot is still pending — link to the latest either way.
+    const loc = res.headers.get("content-location") || "";
+    return loc.startsWith("/web/")
+      ? { ok: true, url: `https://web.archive.org${loc}` }
+      : { ok: true, url: `https://web.archive.org/web/*/${url}`, note: "submitted; snapshot may be pending" };
   } catch (e) {
     return { ok: false, reason: e.name === "AbortError" ? "timeout" : e.message, manual: save };
   } finally {
@@ -68,7 +74,7 @@ export async function publish({ htmlPath, html, id, dir } = {}) {
   if (!html) throw new Error("publish: need `html` or `htmlPath`");
   id = String(id || basename(htmlPath || "report", ".html")).replace(/[^A-Za-z0-9_-]/g, "") || "report";
 
-  const publishDir = expand(dir || process.env.PROVENANT_PUBLISH_DIR || "");
+  const publishDir = expandHome(dir || process.env.PROVENANT_PUBLISH_DIR || "");
   if (!publishDir) {
     return { url: null, dir: null, deployed: false, reason: "no publish target (set PROVENANT_PUBLISH_DIR or pass --dir)" };
   }
@@ -81,10 +87,11 @@ export async function publish({ htmlPath, html, id, dir } = {}) {
 
   const linked = existsSync(join(root, ".vercel", "project.json"));
   const wantVercel = linked || process.env.PROVENANT_VERCEL === "1";
-  if (!(wantVercel && hasVercelCli())) {
+  const vercelCli = hasVercelCli();
+  if (!(wantVercel && vercelCli)) {
     return {
       url: null, dir: root, page, deployed: false,
-      reason: hasVercelCli()
+      reason: vercelCli
         ? "wrote file but did not deploy (link the dir to Vercel, or set PROVENANT_VERCEL=1)"
         : "wrote file but no Vercel CLI found — copy it to a web host to make it accessible",
     };
@@ -98,7 +105,7 @@ export async function publish({ htmlPath, html, id, dir } = {}) {
   catch (e) { out = (e.stdout || "") + "\n" + (e.stderr || ""); }
   const deployUrl = (out.match(/https:\/\/[a-z0-9.-]+\.vercel\.app/i) || [])[0];
   const base = stable ? `https://${stable}.vercel.app` : deployUrl;
-  if (!base) return { url: null, dir: root, page, deployed: false, reason: "vercel deploy returned no URL", log: out.slice(-400) };
+  if (!base) return { url: null, dir: root, page, deployed: false, reason: "vercel deploy returned no URL", log: out.trim().slice(-600) };
 
   const result = { url: `${base}/${id}.html`, indexUrl: `${base}/`, dir: root, deployed: true };
 
@@ -110,6 +117,7 @@ export async function publish({ htmlPath, html, id, dir } = {}) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  loadEnv(import.meta.url);
   const a = process.argv.slice(2);
   const f = a.find((x) => !x.startsWith("-"));
   const get = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
@@ -121,5 +129,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (r.archive) console.log(`archive   → not captured (${r.archive.reason}); save manually: ${r.archive.manual}`);
   } else {
     console.log(`not deployed (${r.reason})${r.page ? `\nlocal: ${r.page}` : ""}`);
+    if (r.log) console.log(`\n${r.log}`);
   }
 }
