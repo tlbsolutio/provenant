@@ -2,7 +2,7 @@
 // Provenant — render a verification report to a single self-contained HTML file.
 // Usage (lib): import { renderReport } from "./report.mjs"
 //        (cli): node scripts/report.mjs <url|id> --analyze [--ai ...] [-o out.html]
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { getTranscript } from "./get_transcript.mjs";
 import { getProvenance } from "./provenance.mjs";
@@ -94,21 +94,41 @@ ${A}
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
+  // Load .env from the repo root (zero-dep). Shell-exported vars take precedence.
+  try {
+    for (const line of readFileSync(new URL("../.env", import.meta.url), "utf8").split("\n")) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+    }
+  } catch { /* no .env — fine */ }
   const input = args.find((x) => !x.startsWith("-"));
   const id = input?.match(/[A-Za-z0-9_-]{11}/)?.[0];
   // constrain output to a .html file in the current directory (no path traversal)
   let out = args.includes("-o") ? basename(args[args.indexOf("-o") + 1] || "") : `${id || "report"}.html`;
   if (!out || out === ".") out = `${id || "report"}.html`;
   if (!out.toLowerCase().endsWith(".html")) out += ".html";
-  if (!id) { console.log("Usage: report.mjs <url|id> [--analyze] [--ai ...] [-o out.html]"); process.exit(1); }
+  if (!id) { console.log("Usage: report.mjs <url|id> [--analyze | --analysis-file a.json] [--ai ...] [-o out.html] [--publish [--publish-dir <dir>]]"); process.exit(1); }
   const [provenance, transcript] = await Promise.all([
     getProvenance(id, { youtubeKey: process.env.YOUTUBE_API_KEY }),
     getTranscript(id, { supadataKey: process.env.SUPADATA_API_KEY })]);
   let analysis = null;
-  if (args.includes("--analyze")) {
+  if (args.includes("--analysis-file")) {
+    // Preferred: the host agent did the web-verified analysis and hands it in as JSON.
+    analysis = JSON.parse(readFileSync(args[args.indexOf("--analysis-file") + 1], "utf8"));
+  } else if (args.includes("--analyze")) {
+    // Autonomous fallback: let the bundled analyzer do it (claude-cli by default).
     const provider = args.includes("--ai") ? args[args.indexOf("--ai") + 1] : undefined;
     analysis = await analyze({ meta: provenance, text: transcript.text }, { provider, anthropicKey: process.env.ANTHROPIC_API_KEY, openaiKey: process.env.OPENAI_API_KEY, tavilyKey: process.env.TAVILY_API_KEY });
   }
   writeFileSync(out, renderReport({ provenance, transcript, analysis }));
   console.log(`report → ${out}`);
+
+  // --publish: copy the report into the configured site dir and (VPS-aware) deploy it.
+  if (args.includes("--publish")) {
+    const { publish } = await import("./publish.mjs");
+    const dir = args.includes("--publish-dir") ? args[args.indexOf("--publish-dir") + 1] : undefined;
+    const r = publish({ htmlPath: out, id, dir });
+    if (r.url) console.log(`published → ${r.url}`);
+    else console.log(`not published (${r.reason})${r.page ? `\nlocal: ${r.page}` : ""}`);
+  }
 }

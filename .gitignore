@@ -8,6 +8,8 @@
 # output / scratch
 out/
 *.local.*
+/*.html
+public/
 
 # node
 node_modules/
