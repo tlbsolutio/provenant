@@ -56,18 +56,30 @@ async function viaBrowser(id) {
   } finally { await browser.close(); }
 }
 
-async function viaKome(id) {
-  const r = await fetch("https://kome.ai/api/transcript", {
-    method: "POST", headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0" },
-    body: JSON.stringify({ video_id: id, format: true }) });
-  if (!r.ok) throw new Error(`kome.ai ${r.status}`);
-  const text = clean((await r.json()).transcript);
-  if (!text) throw new Error("kome.ai empty");
-  // reject error pages / blocked responses masquerading as a transcript
-  if (text.split(/\s+/).length < 5) throw new Error("kome.ai returned suspiciously short text");
-  if (/sign in to confirm|video unavailable|enable javascript|are you a robot|captcha/i.test(text))
-    throw new Error("kome.ai returned an error page, not a transcript");
-  return { source: "kome.ai", hasTimestamps: false, segments: null, text };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// kome's "not available" notice is often TRANSIENT — it returns it while still
+// fetching the captions server-side. Retry a few times before believing it.
+const KOME_UNAVAILABLE = /transcripts?\s+(aren'?t|are not)\s+available|publisher may have restricted|apologies for any inconvenience/i;
+
+async function viaKome(id, { retries = 3, verbose = false } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const r = await fetch("https://kome.ai/api/transcript", {
+      method: "POST", headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0" },
+      body: JSON.stringify({ video_id: id, format: true }) });
+    if (!r.ok) throw new Error(`kome.ai ${r.status}`);
+    const text = clean((await r.json()).transcript);
+    if (!text) throw new Error("kome.ai empty");
+    // reject error pages / blocked responses masquerading as a transcript
+    if (text.split(/\s+/).length < 5) throw new Error("kome.ai returned suspiciously short text");
+    if (/sign in to confirm|video unavailable|enable javascript|are you a robot|captcha/i.test(text))
+      throw new Error("kome.ai returned an error page, not a transcript");
+    if (KOME_UNAVAILABLE.test(text)) {
+      if (attempt <= retries) { if (verbose) console.error(`[transcript] kome 'not available' (often transient) — retry ${attempt}/${retries}`); await sleep(2500); continue; }
+      // after retries it's likely a genuine no-caption video — fail honestly, never render the notice
+      throw new Error(`no captions available for this video (kome, after ${retries} retries)`);
+    }
+    return { source: "kome.ai", hasTimestamps: false, segments: null, text };
+  }
 }
 
 export async function getTranscript(input, opts = {}) {
@@ -76,7 +88,7 @@ export async function getTranscript(input, opts = {}) {
   const attempts = [];
   if (opts.supadataKey) attempts.push(() => viaSupadata(id, opts.supadataKey));
   if (opts.browser !== false && (await hasPlaywright())) attempts.push(() => viaBrowser(id));
-  attempts.push(() => viaKome(id));
+  attempts.push(() => viaKome(id, { verbose: opts.verbose }));
   const errs = [];
   for (const fn of attempts) {
     try { const r = await fn(); return { videoId: id, words: r.text.split(/\s+/).length, ...r }; }
