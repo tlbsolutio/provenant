@@ -8,6 +8,8 @@ import { getProvenance } from "./provenance.mjs";
 import { analyze } from "./analyze.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// AI-supplied links must be http(s) only — block javascript:/data: etc.
+const safeUrl = (u) => { try { return /^https?:$/.test(new URL(u).protocol) ? String(u) : "#"; } catch { return "#"; } };
 const ts = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = Math.floor(s % 60); return (h ? h + ":" : "") + `${String(m).padStart(h ? 2 : 1, "0")}:${String(x).padStart(2, "0")}`; };
 const VC = { "true": ["#15803d", "#dcfce7"], "mostly true": ["#15803d", "#dcfce7"], mixed: ["#b45309", "#fef3c7"], misleading: ["#b45309", "#fef3c7"], unverifiable: ["#52525b", "#f4f4f5"], "false": ["#b91c1c", "#fee2e2"] };
 
@@ -20,11 +22,11 @@ export function renderReport({ provenance: p, transcript: t, analysis: a }) {
   let A = "";
   if (a) {
     const kp = (a.keyPoints || []).map((x) => `<li>${esc(x)}</li>`).join("");
-    const links = (a.keyLinks || []).map((l) => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || l.url)}</a>${l.note ? " — " + esc(l.note) : ""}</li>`).join("") || "<li class='muted'>—</li>";
+    const links = (a.keyLinks || []).map((l) => `<li><a href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener nofollow">${esc(l.label || l.url)}</a>${l.note ? " — " + esc(l.note) : ""}</li>`).join("") || "<li class='muted'>—</li>";
     const fc = (a.factChecks || []).map((f) => { const [fg, bg] = VC[(f.verdict || "").toLowerCase()] || VC.unverifiable;
-      const src = (f.sources || []).map((s) => `<a href="${esc(s)}" target="_blank" rel="noopener">source</a>`).join(" ");
+      const src = (f.sources || []).map((s) => `<a href="${esc(safeUrl(s))}" target="_blank" rel="noopener nofollow">source</a>`).join(" ");
       const tag = f.webChecked ? "" : ' <span class="ai">AI-inferred</span>';
-      return `<div class="fc" style="--fg:${fg};--bg:${bg}"><span class="v">${esc(f.verdict)}</span><p class="c">${esc(f.claim)}</p><p class="e">${esc(f.explanation)}${tag} ${src}</p></div>`; }).join("") || "<p class='muted'>No discrete claims.</p>";
+      return `<div class="fc" style="--fg:${fg};--vbg:${bg}"><span class="v">${esc(f.verdict)}</span><p class="c">${esc(f.claim)}</p><p class="e">${esc(f.explanation)}${tag} ${src}</p></div>`; }).join("") || "<p class='muted'>No discrete claims.</p>";
     const b = a.bias || {}; const pol = b.political; const pos = b.score == null ? 50 : Math.max(2, Math.min(98, 50 + b.score * 10));
     A = `<div class="badge">Analysis</div>
 <p class="lead">${esc(a.tldr)}</p>
@@ -59,7 +61,7 @@ section{padding:26px 0;border-top:1px solid var(--border)}section h2{font-size:1
 ul.pts{font-family:"Source Serif 4",serif;font-size:1.08rem;list-style:none;margin:0;padding:0}ul.pts li{position:relative;padding:0 0 12px 24px}ul.pts li:before{content:"";position:absolute;left:3px;top:10px;width:7px;height:7px;border-radius:50%;background:var(--accent)}
 ul.lk{list-style:none;margin:0;padding:0}ul.lk li{padding:11px 0;border-bottom:1px solid var(--border)}ul.lk a{font-weight:600}
 .fc{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--fg);border-radius:10px;padding:15px 17px;margin:0 0 12px}
-.fc .v{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--fg);background:var(--bg,#f4f4f5);background:var(--bg);padding:3px 9px;border-radius:6px;margin-bottom:8px}.fc .v{background:var(--bg)}
+.fc .v{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--fg);background:var(--vbg);padding:3px 9px;border-radius:6px;margin-bottom:8px}
 .fc .c{font-family:"Source Serif 4",serif;font-weight:600;font-size:1.06rem;margin:0 0 5px}.fc .e{font-size:.95rem;color:var(--ink2);margin:0}.fc .e a{font-size:.82rem;margin-left:6px;border-bottom:1px solid var(--border)}
 .ai{font-size:.72rem;background:#f4f4f5;color:#78716c;padding:1px 6px;border-radius:4px}
 .bl{font-family:"Playfair Display",serif;font-size:1.4rem;font-weight:700;margin-bottom:14px}
